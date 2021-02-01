@@ -17,6 +17,7 @@ func init() {
 	viper.AutomaticEnv()
 
 	rootCmd.AddCommand(scaleCmd)
+	rootCmd.AddCommand(hibernate)
 }
 
 func main() {

@@ -192,7 +192,7 @@ func scaleInstallation(newSize string, installation *cmodel.InstallationDTO, cli
 }
 
 func getInstallationUserMetrics(thanosURL string) (map[string]int64, error) {
-	rawMetrics, err := queryInstallationMetrics(thanosURL, "mattermost_db_active_users")
+	rawMetrics, err := queryInstallationMetrics(thanosURL, "mattermost_db_active_users", time.Now())
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to query thanos")
 	}
