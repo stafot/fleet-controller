@@ -2,7 +2,7 @@ version: 2.1
 executors:
   default:
     docker:
-      - image: circleci/golang:1.15.6
+      - image: circleci/golang:1.15.7
 
 jobs:
   lint:
@@ -19,9 +19,88 @@ jobs:
       - checkout
       - run: make unittest
 
+  push-docker-pr:
+    executor:
+      name: default
+    steps:
+    - checkout
+    - setup_remote_docker
+    - run: make build-image
+    - run: ./scripts/push-docker-pr.sh
+    - run:
+        name: Re-run Docker Push if fail
+        command: |
+            sleep 20
+            ./scripts/push-docker-pr.sh
+        when: on_fail
+
+  push-docker:
+    executor:
+      name: default
+    steps:
+    - checkout
+    - setup_remote_docker
+    - run: make build-image
+    - run: ./scripts/push-docker.sh
+    - run:
+        name: Re-run Docker Push if fail
+        command: |
+            sleep 20
+            ./scripts/push-docker.sh
+        when: on_fail
+
 workflows:
   version: 2
-  untagged-build:
+  pr-build:
     jobs:
-      - lint
-      - test
+    - lint
+    - test
+    - push-docker-pr:
+        context: matterbuild-docker
+        requires:
+        - lint
+        - test
+  master-build:
+    jobs:
+    - lint:
+        filters:
+          branches:
+            only:
+            - main
+    - test:
+        filters:
+          branches:
+            only:
+            - main
+    - push-docker:
+          context: matterbuild-docker
+          requires:
+          - lint
+          - test
+          filters:
+            branches:
+              only:
+              - main
+  tag-builds:
+    jobs:
+    - lint:
+        filters:
+          branches:
+            only:
+            - main
+    - test:
+        filters:
+          tags:
+            only: /^v.*/
+          branches:
+            ignore: /.*/
+    - push-docker:
+        context: matterbuild-docker
+        requires:
+        - lint
+        - test
+        filters:
+          tags:
+            only: /^v.*/
+          branches:
+            ignore: /.*/
