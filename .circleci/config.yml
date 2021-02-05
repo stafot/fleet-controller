@@ -62,11 +62,6 @@ workflows:
         - test
   master-build:
     jobs:
-    - lint:
-        filters:
-          branches:
-            only:
-            - main
     - test:
         filters:
           branches:
@@ -75,7 +70,6 @@ workflows:
     - push-docker:
           context: matterbuild-docker
           requires:
-          - lint
           - test
           filters:
             branches:
@@ -83,11 +77,6 @@ workflows:
               - main
   tag-builds:
     jobs:
-    - lint:
-        filters:
-          branches:
-            only:
-            - main
     - test:
         filters:
           tags:
@@ -97,7 +86,6 @@ workflows:
     - push-docker:
         context: matterbuild-docker
         requires:
-        - lint
         - test
         filters:
           tags:
