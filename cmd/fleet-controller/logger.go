@@ -7,6 +7,8 @@ package main
 import (
 	"os"
 
+	cmodel "github.com/mattermost/mattermost-cloud/model"
+	"github.com/sirupsen/logrus"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -19,4 +21,9 @@ func init() {
 	logger.SetFormatter(&log.TextFormatter{
 		FullTimestamp: true,
 	})
+}
+
+func setupProductionLogging(l log.FieldLogger) *log.Entry {
+	logger.SetFormatter(&logrus.JSONFormatter{})
+	return l.WithField("run", cmodel.NewID())
 }

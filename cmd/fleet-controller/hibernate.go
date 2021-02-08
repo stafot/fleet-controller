@@ -5,15 +5,14 @@
 package main
 
 import (
-	"fmt"
 	"time"
 
-	cmodel "github.com/mattermost/mattermost-cloud/model"
 	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
-	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
-	pmodel "github.com/prometheus/common/model"
+	"github.com/mattermost/fleet-controller/internal/metrics"
+	cmodel "github.com/mattermost/mattermost-cloud/model"
 )
 
 func init() {
@@ -22,6 +21,7 @@ func init() {
 	hibernate.PersistentFlags().Bool("dry-run", true, "Whether the autoscaler will perform scaling actions or just print actions that would be taken.")
 	hibernate.PersistentFlags().Bool("unlock", false, "Whether the autoscaler will unlock installations to update their size or not.")
 	hibernate.PersistentFlags().Int("days", 7, "The number of days back to check if an installation has received new posts since.")
+	hibernate.PersistentFlags().Int64("max-users", 100, "The number of users where the installation won't be hibernated regardless of activity.")
 
 	// Installation filters
 	hibernate.PersistentFlags().String("owner", "", "The owner ID value to filter installations by.")
@@ -34,6 +34,12 @@ var hibernate = &cobra.Command{
 	RunE: func(command *cobra.Command, args []string) error {
 		command.SilenceUsage = true
 
+		logger := logger.WithField("fleet-controller", "hibernate")
+		productionLogs, _ := command.Flags().GetBool("production-logs")
+		if productionLogs {
+			logger = setupProductionLogging(logger)
+		}
+
 		logger.Info("Starting installation hibernator")
 
 		serverAddress, _ := command.Flags().GetString("server")
@@ -41,6 +47,7 @@ var hibernate = &cobra.Command{
 		dryrun, _ := command.Flags().GetBool("dry-run")
 		unlock, _ := command.Flags().GetBool("unlock")
 		days, _ := command.Flags().GetInt("days")
+		maxUsers, _ := command.Flags().GetInt64("max-users")
 		owner, _ := command.Flags().GetString("owner")
 		group, _ := command.Flags().GetString("group")
 
@@ -53,7 +60,10 @@ var hibernate = &cobra.Command{
 
 		client := cmodel.NewClient(serverAddress)
 
-		logger.Info("Obtaining current installations")
+		logger.WithFields(logrus.Fields{
+			"owner-filter": owner,
+			"group-filter": group,
+		}).Info("Obtaining current installations")
 		installations, err := client.GetInstallations(&cmodel.GetInstallationsRequest{
 			State:                       cmodel.InstallationStateStable,
 			OwnerID:                     owner,
@@ -68,7 +78,16 @@ var hibernate = &cobra.Command{
 			return errors.Wrap(err, "failed to get installations")
 		}
 
+		tc := metrics.NewThanosClient(thanosURL)
+
+		logger.Info("Gathering installation user metrics")
+		userMetrics, err := tc.GetInstallationUserMetrics()
+		if err != nil {
+			return errors.Wrap(err, "failed to obtain installation metrics")
+		}
+
 		logger.Infof("Calculating hibernate actions on %d stable installations", len(installations))
+		var errorSkipCount, maxUserSkipCount int
 		var installationsToHibernate []*cmodel.InstallationDTO
 		for i, installation := range installations {
 			current := i + 1
@@ -76,30 +95,31 @@ var hibernate = &cobra.Command{
 				logger.Debugf("Processing installation %d of %d", current, len(installations))
 			}
 
-			if installation.State != cmodel.InstallationStateStable {
-				logger.Warnf("%s - Expected only stable installations (%s); skipping...", installation.ID, installation.State)
+			logger.WithField("installation", installation.ID)
+
+			shouldHibernate, err := shouldHibernate(installation, userMetrics, tc, unlock, days, maxUsers)
+			if shouldHibernate && err != nil {
+				logger.WithField("reason", err.Error()).Info("Skipping valid hibernation target")
+				maxUserSkipCount++
 				continue
 			}
-			if installation.APISecurityLock && !unlock {
-				logger.Warnf("%s - Installation is locked and hibernator is not set to perform unlocks; skipping...", installation.ID)
-				continue
-			}
-
-			// A small sleep to help prevent hitting the metrics host too hard.
-			// Using the force a bit here. May need to be tweaked.
-			time.Sleep(100 * time.Millisecond)
-
-			hibernate, err := determineIfInstallationRequiresHibernation(installation.ID, thanosURL, days)
 			if err != nil {
-				logger.WithError(err).Warnf("%s - Failed to determine if installation should hibernate", installation.ID)
+				logger.WithError(err).Warn("Failed hibernation determination")
+				errorSkipCount++
 				continue
 			}
-			if !hibernate {
+			if !shouldHibernate {
 				continue
 			}
 
 			installationsToHibernate = append(installationsToHibernate, installation)
 		}
+
+		logger.WithFields(logrus.Fields{
+			"hibernation-count":              len(installationsToHibernate),
+			"hibernation-calculation-errors": errorSkipCount,
+			"hibernation-skip-from-users":    maxUserSkipCount,
+		}).Info("Hibernation calculations complete")
 
 		if len(installationsToHibernate) == 0 {
 			logger.Info("No installations requre hibernation; exiting...")
@@ -109,21 +129,22 @@ var hibernate = &cobra.Command{
 		logger.Infof("Hibernating %d installations", len(installationsToHibernate))
 		if dryrun {
 			logger.Info("Dry run complete")
-		} else {
-			for _, installation := range installationsToHibernate {
-				logger.Infof("%s - Hibernating installation", installation.ID)
+			return nil
+		}
 
-				err = hibernateInstallation(installation, client)
-				if err != nil {
-					return errors.Wrap(err, "failed to hibernate installation")
-				}
+		for _, installation := range installationsToHibernate {
+			logger.WithField("installation", installation.ID).Info("Hibernating installation")
 
-				// Another sleep to slow the API calls to the provisioner.
-				time.Sleep(500 * time.Millisecond)
+			err = hibernateInstallation(installation, client)
+			if err != nil {
+				return errors.Wrap(err, "failed to hibernate installation")
 			}
 
-			logger.Info("Hibernation check complete")
+			// Another sleep to slow the API calls to the provisioner.
+			time.Sleep(500 * time.Millisecond)
 		}
+
+		logger.Info("Hibernation check complete")
 
 		return nil
 	},
@@ -156,44 +177,37 @@ func hibernateInstallation(installation *cmodel.InstallationDTO, client *cmodel.
 	return nil
 }
 
-func determineIfInstallationRequiresHibernation(installationID, thanosURL string, days int) (bool, error) {
-	now := time.Now()
-	startTime := now.AddDate(0, 0, -days)
-
-	r := v1.Range{
-		Start: startTime,
-		End:   now,
-		Step:  time.Duration(days) * 24 * time.Hour,
+// shouldHibernate determines if an installation should be hibernated or not.
+// If the installation should be hibernated, but an error is also returned then
+// that indicates that the installation meets hibernation criteria, but was also
+// whitelisted due to another metric such as user count.
+func shouldHibernate(installation *cmodel.InstallationDTO, userMetrics map[string]int64, mc metricsClient, unlock bool, days int, maxUsers int64) (bool, error) {
+	if installation.State != cmodel.InstallationStateStable {
+		return false, errors.Errorf("expected only stable installations (%s)", installation.State)
 	}
-	rawMetrics, err := queryRangeInstallationMetrics(thanosURL, fmt.Sprintf("max(mattermost_post_total{installationId=\"%s\"})", installationID), r)
+	if installation.APISecurityLock && !unlock {
+		return false, errors.New("installation is locked and hibernator is not set to perform unlocks")
+	}
+
+	// A small sleep to help prevent hitting the metrics host too hard.
+	// Using the force a bit here. May need to be tweaked.
+	time.Sleep(100 * time.Millisecond)
+
+	hasNoNewPosts, err := mc.DetermineIfInstallationHasNoNewPosts(installation.ID, days)
 	if err != nil {
-		return false, errors.Wrap(err, "failed to query thanos")
+		return false, errors.Wrap(err, "failed to deterimine if installation has new posts")
 	}
-	if len(rawMetrics) == 0 {
-		return false, errors.New("no post metrics found for this installation")
+	if !hasNoNewPosts {
+		// The installation is still active.
+		return false, nil
 	}
-
-	return shouldHibernate(rawMetrics), nil
-}
-
-func shouldHibernate(rawMetrics pmodel.Matrix) bool {
-	if len(rawMetrics) == 0 {
-		return false
+	userCount, ok := userMetrics[installation.ID]
+	if !ok {
+		return false, errors.New("no user metrics found")
 	}
-
-	// Loop through each metric. Depending on the prometheus query, there could
-	// be multiple results. For instance, we could have a max post count collected
-	// from multiple pods.
-	for _, rawMetric := range rawMetrics {
-		// We expect two values for each metric. The first value will be the most
-		// recent and the second will be the value from a previous point in time.
-		if len(rawMetric.Values) != 2 {
-			return false
-		}
-		if rawMetric.Values[0].Value != rawMetric.Values[1].Value {
-			return false
-		}
+	if userCount >= maxUsers {
+		return true, errors.Errorf("installation would be hibernated, but has %d users", userCount)
 	}
 
-	return true
+	return true, nil
 }

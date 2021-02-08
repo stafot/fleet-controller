@@ -8,11 +8,11 @@ import (
 	"math/rand"
 	"time"
 
-	cmodel "github.com/mattermost/mattermost-cloud/model"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 
-	pmodel "github.com/prometheus/common/model"
+	"github.com/mattermost/fleet-controller/internal/metrics"
+	cmodel "github.com/mattermost/mattermost-cloud/model"
 )
 
 func init() {
@@ -35,6 +35,12 @@ var scaleCmd = &cobra.Command{
 	Short: "Scale installations based on user counts",
 	RunE: func(command *cobra.Command, args []string) error {
 		command.SilenceUsage = true
+
+		logger := logger.WithField("fleet-controller", "scale")
+		productionLogs, _ := command.Flags().GetBool("production-logs")
+		if productionLogs {
+			logger = setupProductionLogging(logger)
+		}
 
 		logger.Info("Starting installation autoscaler")
 
@@ -85,8 +91,10 @@ var scaleCmd = &cobra.Command{
 				continue
 			}
 
+			tc := metrics.NewThanosClient(thanosURL)
+
 			logger.Info("Gathering installation user metrics")
-			metrics, err := getInstallationUserMetrics(thanosURL)
+			metrics, err := tc.GetInstallationUserMetrics()
 			if err != nil {
 				return errors.Wrap(err, "failed to obtain installation metrics")
 			}
@@ -189,38 +197,4 @@ func scaleInstallation(newSize string, installation *cmodel.InstallationDTO, cli
 	}
 
 	return nil
-}
-
-func getInstallationUserMetrics(thanosURL string) (map[string]int64, error) {
-	rawMetrics, err := queryInstallationMetrics(thanosURL, "mattermost_db_active_users", time.Now())
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to query thanos")
-	}
-
-	return buildFinalInstallationUserCountMetrics(rawMetrics), nil
-}
-
-func buildFinalInstallationUserCountMetrics(rawMetrics pmodel.Vector) map[string]int64 {
-	installationMetrics := make(map[string]int64)
-
-	for _, rawMetric := range rawMetrics {
-		id, ok := rawMetric.Metric["installationId"]
-		if !ok {
-			logger.Warnf("Metric does not contain an installation ID: %s", rawMetric.String())
-			continue
-		}
-		userCount := int64(rawMetric.Value)
-
-		originalCount, ok := installationMetrics[string(id)]
-		if !ok {
-			installationMetrics[string(id)] = userCount
-		} else {
-			// Duplicate metric from other pods; use highest value seen.
-			if userCount > originalCount {
-				installationMetrics[string(id)] = userCount
-			}
-		}
-	}
-
-	return installationMetrics
 }

@@ -7,14 +7,16 @@ package main
 import (
 	"os"
 
+	"github.com/ory/viper"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
 func init() {
 	viper.SetEnvPrefix("FC")
 	viper.AutomaticEnv()
+
+	rootCmd.PersistentFlags().Bool("production-logs", viper.GetBool("PRODUCTION_LOGS"), "Set log output with production settings | ENV: FC_PRODUCTION_LOGS")
 
 	rootCmd.AddCommand(scaleCmd)
 	rootCmd.AddCommand(hibernate)
