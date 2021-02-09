@@ -5,6 +5,7 @@
 package main
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/pkg/errors"
@@ -35,12 +36,15 @@ var hibernate = &cobra.Command{
 		command.SilenceUsage = true
 
 		logger := logger.WithField("fleet-controller", "hibernate")
+		runID := "none"
 		productionLogs, _ := command.Flags().GetBool("production-logs")
 		if productionLogs {
-			logger = setupProductionLogging(logger)
+			logger, runID = setupProductionLogging(logger)
 		}
 
 		logger.Info("Starting installation hibernator")
+
+		start := time.Now()
 
 		serverAddress, _ := command.Flags().GetString("server")
 		thanosURL, _ := command.Flags().GetString("thanos-url")
@@ -50,6 +54,7 @@ var hibernate = &cobra.Command{
 		maxUsers, _ := command.Flags().GetInt64("max-users")
 		owner, _ := command.Flags().GetString("owner")
 		group, _ := command.Flags().GetString("group")
+		webhookURL, _ := command.Flags().GetString("mm-webhook-url")
 
 		if len(serverAddress) == 0 {
 			return errors.New("server value must be defined")
@@ -144,7 +149,19 @@ var hibernate = &cobra.Command{
 			time.Sleep(500 * time.Millisecond)
 		}
 
-		logger.Info("Hibernation check complete")
+		runtime := fmt.Sprintf("%s", time.Now().Sub(start))
+
+		if len(webhookURL) != 0 {
+			logger.Info("Sending hibernation report webhook")
+
+			webhookText := fmt.Sprintf(hibernateReportMessage, wrapInlineCode(runID), runtime, len(installations), len(installationsToHibernate), maxUserSkipCount, errorSkipCount)
+			err = sendHibernateReportWebhook(webhookURL, webhookText)
+			if err != nil {
+				logger.WithError(err).Error("Failed to send Mattermost webhook")
+			}
+		}
+
+		logger.WithField("runtime", runtime).Info("Hibernation check complete")
 
 		return nil
 	},

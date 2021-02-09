@@ -17,6 +17,7 @@ func init() {
 	viper.AutomaticEnv()
 
 	rootCmd.PersistentFlags().Bool("production-logs", viper.GetBool("PRODUCTION_LOGS"), "Set log output with production settings | ENV: FC_PRODUCTION_LOGS")
+	rootCmd.PersistentFlags().String("mm-webhook-url", viper.GetString("MM_WEBHOOK_URL"), "Optional Mattmost incoming webhook URL to send information on actions taken by fleet controller | ENV: FC_MM_WEBHOOK_URL")
 
 	rootCmd.AddCommand(scaleCmd)
 	rootCmd.AddCommand(hibernate)

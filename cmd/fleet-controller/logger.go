@@ -23,7 +23,9 @@ func init() {
 	})
 }
 
-func setupProductionLogging(l log.FieldLogger) *log.Entry {
+func setupProductionLogging(l log.FieldLogger) (*log.Entry, string) {
 	logger.SetFormatter(&logrus.JSONFormatter{})
-	return l.WithField("run", cmodel.NewID())
+
+	runID := cmodel.NewID()
+	return l.WithField("run", runID), runID
 }

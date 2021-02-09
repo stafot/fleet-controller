@@ -39,7 +39,7 @@ var scaleCmd = &cobra.Command{
 		logger := logger.WithField("fleet-controller", "scale")
 		productionLogs, _ := command.Flags().GetBool("production-logs")
 		if productionLogs {
-			logger = setupProductionLogging(logger)
+			logger, _ = setupProductionLogging(logger)
 		}
 
 		logger.Info("Starting installation autoscaler")
