@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
 	"github.com/mattermost/fleet-controller/internal/metrics"
@@ -65,7 +65,7 @@ var hibernate = &cobra.Command{
 
 		client := cmodel.NewClient(serverAddress)
 
-		logger.WithFields(logrus.Fields{
+		logger.WithFields(log.Fields{
 			"owner-filter": owner,
 			"group-filter": group,
 		}).Info("Obtaining current installations")
@@ -100,9 +100,9 @@ var hibernate = &cobra.Command{
 				logger.Debugf("Processing installation %d of %d", current, len(installations))
 			}
 
-			logger.WithField("installation", installation.ID)
+			logger := logger.WithField("installation", installation.ID)
 
-			shouldHibernate, err := shouldHibernate(installation, userMetrics, tc, unlock, days, maxUsers)
+			shouldHibernate, err := shouldHibernate(installation, userMetrics, tc, unlock, days, maxUsers, logger)
 			if shouldHibernate && err != nil {
 				logger.WithField("reason", err.Error()).Info("Skipping valid hibernation target")
 				maxUserSkipCount++
@@ -120,7 +120,7 @@ var hibernate = &cobra.Command{
 			installationsToHibernate = append(installationsToHibernate, installation)
 		}
 
-		logger.WithFields(logrus.Fields{
+		logger.WithFields(log.Fields{
 			"hibernation-count":              len(installationsToHibernate),
 			"hibernation-calculation-errors": errorSkipCount,
 			"hibernation-skip-from-users":    maxUserSkipCount,
@@ -198,7 +198,7 @@ func hibernateInstallation(installation *cmodel.InstallationDTO, client *cmodel.
 // If the installation should be hibernated, but an error is also returned then
 // that indicates that the installation meets hibernation criteria, but was also
 // whitelisted due to another metric such as user count.
-func shouldHibernate(installation *cmodel.InstallationDTO, userMetrics map[string]int64, mc metricsClient, unlock bool, days int, maxUsers int64) (bool, error) {
+func shouldHibernate(installation *cmodel.InstallationDTO, userMetrics map[string]int64, mc metricsClient, unlock bool, days int, maxUsers int64, logger log.FieldLogger) (bool, error) {
 	if installation.State != cmodel.InstallationStateStable {
 		return false, errors.Errorf("expected only stable installations (%s)", installation.State)
 	}
@@ -210,12 +210,12 @@ func shouldHibernate(installation *cmodel.InstallationDTO, userMetrics map[strin
 	// Using the force a bit here. May need to be tweaked.
 	time.Sleep(100 * time.Millisecond)
 
-	hasNoNewPosts, err := mc.DetermineIfInstallationHasNoNewPosts(installation.ID, days)
+	newPosts, err := mc.GetInstallationNewPostCount(installation.ID, days)
 	if err != nil {
 		return false, errors.Wrap(err, "failed to deterimine if installation has new posts")
 	}
-	if !hasNoNewPosts {
-		// The installation is still active.
+	if newPosts != 0 {
+		logger.Debugf("Installation has %.5f new posts", newPosts)
 		return false, nil
 	}
 	userCount, ok := userMetrics[installation.ID]

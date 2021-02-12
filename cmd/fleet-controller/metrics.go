@@ -6,5 +6,5 @@ package main
 
 type metricsClient interface {
 	GetInstallationUserMetrics() (map[string]int64, error)
-	DetermineIfInstallationHasNoNewPosts(installationID string, days int) (bool, error)
+	GetInstallationNewPostCount(installationID string, days int) (float64, error)
 }

@@ -8,8 +8,8 @@ type mockMetricsClient struct {
 	finalUserMetrics map[string]int64
 	userError        error
 
-	installationHasNoNewPosts bool
-	newPostsError             error
+	newPostCount  float64
+	newPostsError error
 }
 
 func newMockMetricsClient() *mockMetricsClient {
@@ -20,6 +20,6 @@ func (mc *mockMetricsClient) GetInstallationUserMetrics() (map[string]int64, err
 	return mc.finalUserMetrics, mc.userError
 }
 
-func (mc *mockMetricsClient) DetermineIfInstallationHasNoNewPosts(installationID string, days int) (bool, error) {
-	return mc.installationHasNoNewPosts, mc.newPostsError
+func (mc *mockMetricsClient) GetInstallationNewPostCount(installationID string, days int) (float64, error) {
+	return mc.newPostCount, mc.newPostsError
 }

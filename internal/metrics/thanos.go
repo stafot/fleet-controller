@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	pmodel "github.com/prometheus/common/model"
 )
 
@@ -34,26 +33,20 @@ func (tc *ThanosClient) GetInstallationUserMetrics() (map[string]int64, error) {
 	return buildFinalInstallationUserCountMetrics(rawMetrics), nil
 }
 
-// DetermineIfInstallationHasNoNewPosts returns if an installation has any new
-// posts since in the provided number of days.
-func (tc *ThanosClient) DetermineIfInstallationHasNoNewPosts(installationID string, days int) (bool, error) {
-	now := time.Now()
-	startTime := now.AddDate(0, 0, -days)
-
-	r := v1.Range{
-		Start: startTime,
-		End:   now,
-		Step:  time.Duration(days) * 24 * time.Hour,
-	}
-	rawMetrics, err := queryRangeInstallationMetrics(tc.url, fmt.Sprintf("max(mattermost_post_total{installationId=\"%s\"})", installationID), r)
+// GetInstallationNewPostCount returns the number of new posts an installation
+// in the given number of days.
+func (tc *ThanosClient) GetInstallationNewPostCount(installationID string, days int) (float64, error) {
+	query := fmt.Sprintf("sum(increase(mattermost_post_total{installationId=\"%s\"}[%dd]))", installationID, days)
+	rawMetrics, err := queryInstallationMetrics(tc.url, query, time.Now())
 	if err != nil {
-		return false, errors.Wrap(err, "failed to query thanos")
-	}
-	if len(rawMetrics) == 0 {
-		return false, errors.New("no post metrics found for this installation")
+		return 0, errors.Wrap(err, "failed to query thanos")
 	}
 
-	return confirmNoNewPosts(rawMetrics), nil
+	if len(rawMetrics) != 1 {
+		return 0, errors.Errorf("expected 1 metric result, but received %d", len(rawMetrics))
+	}
+
+	return float64(rawMetrics[0].Value), nil
 }
 
 func buildFinalInstallationUserCountMetrics(rawMetrics pmodel.Vector) map[string]int64 {
@@ -80,6 +73,9 @@ func buildFinalInstallationUserCountMetrics(rawMetrics pmodel.Vector) map[string
 	return installationMetrics
 }
 
+// TODO: possibly deprecate this.
+// Used with original assumption that the mattermost_post_total was actually the
+// total number of posts in Mattermost.
 func confirmNoNewPosts(rawMetrics pmodel.Matrix) bool {
 	if len(rawMetrics) == 0 {
 		return false
