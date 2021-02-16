@@ -221,6 +221,9 @@ func shouldHibernate(installation *cmodel.InstallationDTO, userMetrics map[strin
 	if !ok {
 		return false, errors.New("no user metrics found")
 	}
+	if userCount == 0 {
+		return false, errors.New("user count for this installation is 0")
+	}
 	if userCount >= int64(maxUsers) {
 		return true, errors.Errorf("installation would be hibernated, but has %d users", userCount)
 	}

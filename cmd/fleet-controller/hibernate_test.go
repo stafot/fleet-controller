@@ -64,6 +64,16 @@ func TestShouldHibernate(t *testing.T) {
 		mc.newPostCount = 10
 	})
 
+	t.Run("installation has a user metric count of 0", func(t *testing.T) {
+		mc.newPostCount = 0
+		userMetrics[installation.ID] = 0
+		shouldHibernate, err := shouldHibernate(installation, userMetrics, mc, true, 7, 100, logger)
+		assert.False(t, shouldHibernate)
+		assert.Error(t, err)
+		mc.newPostCount = 10
+		userMetrics[installation.ID] = 5
+	})
+
 	t.Run("error getting post metrics", func(t *testing.T) {
 		mc.newPostsError = errors.New("test")
 		shouldHibernate, err := shouldHibernate(installation, userMetrics, mc, true, 7, 4, logger)
