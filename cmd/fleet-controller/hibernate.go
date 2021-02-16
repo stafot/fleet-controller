@@ -22,7 +22,7 @@ func init() {
 	hibernate.PersistentFlags().Bool("dry-run", true, "Whether the autoscaler will perform scaling actions or just print actions that would be taken.")
 	hibernate.PersistentFlags().Bool("unlock", false, "Whether the autoscaler will unlock installations to update their size or not.")
 	hibernate.PersistentFlags().Int("days", 7, "The number of days back to check if an installation has received new posts since.")
-	hibernate.PersistentFlags().Int64("max-users", 100, "The number of users where the installation won't be hibernated regardless of activity.")
+	hibernate.PersistentFlags().Int("max-users", 100, "The number of users where the installation won't be hibernated regardless of activity.")
 
 	// Installation filters
 	hibernate.PersistentFlags().String("owner", "", "The owner ID value to filter installations by.")
@@ -35,12 +35,8 @@ var hibernate = &cobra.Command{
 	RunE: func(command *cobra.Command, args []string) error {
 		command.SilenceUsage = true
 
-		logger := logger.WithField("fleet-controller", "hibernate")
-		runID := "none"
 		productionLogs, _ := command.Flags().GetBool("production-logs")
-		if productionLogs {
-			logger, runID = setupProductionLogging(logger)
-		}
+		logger := setupLogger("hibernate", productionLogs)
 
 		logger.Info("Starting installation hibernator")
 
@@ -51,7 +47,7 @@ var hibernate = &cobra.Command{
 		dryrun, _ := command.Flags().GetBool("dry-run")
 		unlock, _ := command.Flags().GetBool("unlock")
 		days, _ := command.Flags().GetInt("days")
-		maxUsers, _ := command.Flags().GetInt64("max-users")
+		maxUsers, _ := command.Flags().GetInt("max-users")
 		owner, _ := command.Flags().GetString("owner")
 		group, _ := command.Flags().GetString("group")
 		webhookURL, _ := command.Flags().GetString("mm-webhook-url")
@@ -154,8 +150,11 @@ var hibernate = &cobra.Command{
 		if len(webhookURL) != 0 {
 			logger.Info("Sending hibernation report webhook")
 
-			webhookText := fmt.Sprintf(hibernateReportMessage, wrapInlineCode(runID), runtime, len(installations), len(installationsToHibernate), maxUserSkipCount, errorSkipCount)
-			err = sendHibernateReportWebhook(webhookURL, webhookText)
+			err = sendHibernateWebhook(webhookURL,
+				runID, runtime, group, owner, days, maxUsers,
+				len(installations), len(installationsToHibernate),
+				maxUserSkipCount, errorSkipCount,
+			)
 			if err != nil {
 				logger.WithError(err).Error("Failed to send Mattermost webhook")
 			}
@@ -198,7 +197,7 @@ func hibernateInstallation(installation *cmodel.InstallationDTO, client *cmodel.
 // If the installation should be hibernated, but an error is also returned then
 // that indicates that the installation meets hibernation criteria, but was also
 // whitelisted due to another metric such as user count.
-func shouldHibernate(installation *cmodel.InstallationDTO, userMetrics map[string]int64, mc metricsClient, unlock bool, days int, maxUsers int64, logger log.FieldLogger) (bool, error) {
+func shouldHibernate(installation *cmodel.InstallationDTO, userMetrics map[string]int64, mc metricsClient, unlock bool, days, maxUsers int, logger log.FieldLogger) (bool, error) {
 	if installation.State != cmodel.InstallationStateStable {
 		return false, errors.Errorf("expected only stable installations (%s)", installation.State)
 	}
@@ -222,7 +221,7 @@ func shouldHibernate(installation *cmodel.InstallationDTO, userMetrics map[strin
 	if !ok {
 		return false, errors.New("no user metrics found")
 	}
-	if userCount >= maxUsers {
+	if userCount >= int64(maxUsers) {
 		return true, errors.Errorf("installation would be hibernated, but has %d users", userCount)
 	}
 

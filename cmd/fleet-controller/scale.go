@@ -36,11 +36,8 @@ var scaleCmd = &cobra.Command{
 	RunE: func(command *cobra.Command, args []string) error {
 		command.SilenceUsage = true
 
-		logger := logger.WithField("fleet-controller", "scale")
 		productionLogs, _ := command.Flags().GetBool("production-logs")
-		if productionLogs {
-			logger, _ = setupProductionLogging(logger)
-		}
+		logger := setupLogger("scale", productionLogs)
 
 		logger.Info("Starting installation autoscaler")
 

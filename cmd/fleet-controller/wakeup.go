@@ -31,11 +31,8 @@ var wakeupCmd = &cobra.Command{
 	RunE: func(command *cobra.Command, args []string) error {
 		command.SilenceUsage = true
 
-		logger := logger.WithField("fleet-controller", "wakeup")
 		productionLogs, _ := command.Flags().GetBool("production-logs")
-		if productionLogs {
-			logger, _ = setupProductionLogging(logger)
-		}
+		logger := setupLogger("wake-up", productionLogs)
 
 		logger.Info("Waking up installations")
 

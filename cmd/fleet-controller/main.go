@@ -7,12 +7,17 @@ package main
 import (
 	"os"
 
+	"github.com/mattermost/mattermost-cloud/model"
 	"github.com/ory/viper"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
 
+var runID string
+
 func init() {
+	runID = model.NewID()
+
 	viper.SetEnvPrefix("FC")
 	viper.AutomaticEnv()
 
@@ -27,6 +32,8 @@ func init() {
 func main() {
 	if err := rootCmd.Execute(); err != nil {
 		logger.Error(errors.Wrap(err, "Command failed").Error())
+		webhookURL, _ := rootCmd.Flags().GetString("mm-webhook-url")
+		sendErrorWebhook(webhookURL, runID, err)
 		os.Exit(1)
 	}
 }

@@ -7,7 +7,6 @@ package main
 import (
 	"os"
 
-	cmodel "github.com/mattermost/mattermost-cloud/model"
 	"github.com/sirupsen/logrus"
 	log "github.com/sirupsen/logrus"
 )
@@ -23,9 +22,12 @@ func init() {
 	})
 }
 
-func setupProductionLogging(l log.FieldLogger) (*log.Entry, string) {
-	logger.SetFormatter(&logrus.JSONFormatter{})
+func setupLogger(cmd string, production bool) *log.Entry {
+	l := logger.WithField("fleet-controller", cmd)
+	if production {
+		logger.SetFormatter(&logrus.JSONFormatter{})
+		l = l.WithField("run", runID)
+	}
 
-	runID := cmodel.NewID()
-	return l.WithField("run", runID), runID
+	return l
 }
