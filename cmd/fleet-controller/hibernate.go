@@ -133,16 +133,46 @@ var hibernate = &cobra.Command{
 			return nil
 		}
 
-		for _, installation := range installationsToHibernate {
-			logger.WithField("installation", installation.ID).Info("Hibernating installation")
-
-			err = hibernateInstallation(installation, client)
+		timer := time.NewTimer(3 * time.Hour)
+		maxUpdating := int64(25)
+		var installationToHibernateIndex int
+		for {
+			updating, err := getCurrentInstallationUpdatingCount(client)
 			if err != nil {
-				return errors.Wrap(err, "failed to hibernate installation")
+				// TODO: maybe allow for a few retries before giving up, but
+				// let's play it safe for now.
+				return errors.Wrap(err, "failed to get current updating count")
 			}
 
-			// Another sleep to slow the API calls to the provisioner.
-			time.Sleep(500 * time.Millisecond)
+			logger.Debugf("%d installations are currently updating (max %d)", updating, maxUpdating)
+			if updating < maxUpdating {
+				// Hibernate up to 5 installations at a time.
+				for i := 1; i <= 5 && installationToHibernateIndex < len(installationsToHibernate); i++ {
+					installation := installationsToHibernate[installationToHibernateIndex]
+					logger.WithField("installation", installation.ID).Infof("Hibernating installation %d/%d", installationToHibernateIndex+1, len(installationsToHibernate))
+
+					err = hibernateInstallation(installation, client)
+					if err != nil {
+						return errors.Wrap(err, "failed to hibernate installation")
+					}
+
+					installationToHibernateIndex++
+
+					// Another sleep to slow the API calls to the provisioner.
+					time.Sleep(100 * time.Millisecond)
+				}
+			}
+
+			if installationToHibernateIndex >= len(installationsToHibernate) {
+				break
+			}
+
+			select {
+			case <-time.After(10 * time.Second):
+				continue
+			case <-timer.C:
+				return errors.Errorf("timed out after 3 hours trying to hibernate %d installations", len(installations))
+			}
 		}
 
 		runtime := fmt.Sprintf("%s", time.Now().Sub(start))
