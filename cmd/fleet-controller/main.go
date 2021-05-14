@@ -27,6 +27,7 @@ func init() {
 	rootCmd.AddCommand(scaleCmd)
 	rootCmd.AddCommand(hibernate)
 	rootCmd.AddCommand(wakeupCmd)
+	rootCmd.AddCommand(deleteCmd)
 }
 
 func main() {
