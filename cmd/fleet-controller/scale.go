@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/mattermost/fleet-controller/internal/metrics"
+	"github.com/mattermost/fleet-controller/model"
 	cmodel "github.com/mattermost/mattermost-cloud/model"
 )
 
@@ -20,7 +21,7 @@ func init() {
 	scaleCmd.PersistentFlags().String("thanos-url", "", "The URL to query thanos metrics from.")
 	scaleCmd.PersistentFlags().Bool("dry-run", true, "Whether the autoscaler will perform scaling actions or just print actions that would be taken.")
 	scaleCmd.PersistentFlags().Bool("unlock", false, "Whether the autoscaler will unlock installations to update their size or not.")
-	scaleCmd.PersistentFlags().Int32("max-updating", 5, "The maximum number of installations that can be currently updating before resizing another batch.")
+	scaleCmd.PersistentFlags().Int64("max-updating", 5, "The maximum number of installations that can be currently updating before resizing another batch.")
 	scaleCmd.PersistentFlags().Int32("batch-size", 3, "The maximum number of installations to resize in a single batch.")
 
 	scaleCmd.PersistentFlags().Bool("fun-mode", true, "Randomizes installation scaling order when disabled which distributes load better. Turn this off if you hate adventure, being generally awesome, and hanging out with the cloud family in the prod alerts channel...")
@@ -46,7 +47,7 @@ var scaleCmd = &cobra.Command{
 		dryrun, _ := command.Flags().GetBool("dry-run")
 		unlock, _ := command.Flags().GetBool("unlock")
 		funMode, _ := command.Flags().GetBool("fun-mode")
-		maxUpdating, _ := command.Flags().GetInt32("max-updating")
+		maxUpdating, _ := command.Flags().GetInt64("max-updating")
 		batchSize, _ := command.Flags().GetInt32("batch-size")
 		owner, _ := command.Flags().GetString("owner")
 		group, _ := command.Flags().GetString("group")
@@ -65,24 +66,21 @@ var scaleCmd = &cobra.Command{
 			installations, err := client.GetInstallations(&cmodel.GetInstallationsRequest{
 				OwnerID:                     owner,
 				GroupID:                     group,
-				Page:                        0,
-				PerPage:                     cmodel.AllPerPage,
+				State:                       cmodel.InstallationStateStable,
 				IncludeGroupConfig:          false,
 				IncludeGroupConfigOverrides: false,
-				IncludeDeleted:              false,
+				Paging: cmodel.Paging{
+					Page:           0,
+					PerPage:        cmodel.AllPerPage,
+					IncludeDeleted: false,
+				},
 			})
 			if err != nil {
 				return errors.Wrap(err, "failed to get installations")
 			}
 
 			var scaled, updating int32
-			for _, installation := range installations {
-				if installation.State != cmodel.InstallationStateStable {
-					updating++
-				}
-			}
-			logger.Infof("%d installations are currently updating (max %d)", updating, maxUpdating)
-			if updating >= maxUpdating {
+			if !model.InstallationsUpdatingIsBelowMax(maxUpdating, client, logger) {
 				logger.Info("Requeing scale actions after 15 seconds")
 				time.Sleep(15 * time.Second)
 				continue

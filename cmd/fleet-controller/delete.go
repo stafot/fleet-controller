@@ -13,6 +13,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 
+	"github.com/mattermost/fleet-controller/model"
 	cmodel "github.com/mattermost/mattermost-cloud/model"
 )
 
@@ -60,15 +61,7 @@ var deleteCmd = &cobra.Command{
 		maxUpdating := int64(25)
 		var installationToDeleteIndex int
 		for {
-			updating, err := getCurrentInstallationUpdatingCount(client)
-			if err != nil {
-				// TODO: maybe allow for a few retries before giving up, but
-				// let's play it safe for now.
-				return errors.Wrap(err, "failed to get current updating count")
-			}
-
-			logger.Debugf("%d installations are currently updating (max %d)", updating, maxUpdating)
-			if updating < maxUpdating {
+			if model.InstallationsUpdatingIsBelowMax(maxUpdating, client, logger) {
 				// Delete up to 5 installations at a time.
 				for i := 1; i <= 5 && installationToDeleteIndex < len(installationIDs); i++ {
 					installation, err := client.GetInstallation(installationIDs[installationToDeleteIndex], &cmodel.GetInstallationRequest{})

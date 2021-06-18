@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/mattermost/fleet-controller/internal/metrics"
+	"github.com/mattermost/fleet-controller/model"
 	cmodel "github.com/mattermost/mattermost-cloud/model"
 )
 
@@ -69,11 +70,13 @@ var hibernate = &cobra.Command{
 			State:                       cmodel.InstallationStateStable,
 			OwnerID:                     owner,
 			GroupID:                     group,
-			Page:                        0,
-			PerPage:                     cmodel.AllPerPage,
 			IncludeGroupConfig:          false,
 			IncludeGroupConfigOverrides: false,
-			IncludeDeleted:              false,
+			Paging: cmodel.Paging{
+				Page:           0,
+				PerPage:        cmodel.AllPerPage,
+				IncludeDeleted: false,
+			},
 		})
 		if err != nil {
 			return errors.Wrap(err, "failed to get installations")
@@ -137,15 +140,7 @@ var hibernate = &cobra.Command{
 		maxUpdating := int64(25)
 		var installationToHibernateIndex int
 		for {
-			updating, err := getCurrentInstallationUpdatingCount(client)
-			if err != nil {
-				// TODO: maybe allow for a few retries before giving up, but
-				// let's play it safe for now.
-				return errors.Wrap(err, "failed to get current updating count")
-			}
-
-			logger.Debugf("%d installations are currently updating (max %d)", updating, maxUpdating)
-			if updating < maxUpdating {
+			if model.InstallationsUpdatingIsBelowMax(maxUpdating, client, logger) {
 				// Hibernate up to 5 installations at a time.
 				for i := 1; i <= 5 && installationToHibernateIndex < len(installationsToHibernate); i++ {
 					installation := installationsToHibernate[installationToHibernateIndex]

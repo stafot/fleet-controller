@@ -58,11 +58,13 @@ var wakeupCmd = &cobra.Command{
 			State:                       cmodel.InstallationStateHibernating,
 			OwnerID:                     owner,
 			GroupID:                     group,
-			Page:                        0,
-			PerPage:                     cmodel.AllPerPage,
 			IncludeGroupConfig:          false,
 			IncludeGroupConfigOverrides: false,
-			IncludeDeleted:              false,
+			Paging: cmodel.Paging{
+				Page:           0,
+				PerPage:        cmodel.AllPerPage,
+				IncludeDeleted: false,
+			},
 		})
 		if err != nil {
 			return errors.Wrap(err, "failed to get installations")
@@ -95,7 +97,7 @@ var wakeupCmd = &cobra.Command{
 		}).Info("Wake up calculations complete")
 
 		if len(installationsToWakeUp) == 0 {
-			logger.Info("No installations requre waking up; exiting...")
+			logger.Info("No installations require waking up; exiting...")
 			return nil
 		}
 
