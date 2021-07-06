@@ -93,6 +93,8 @@ var hibernate = &cobra.Command{
 		logger.Infof("Calculating hibernate actions on %d stable installations", len(installations))
 		var errorSkipCount, maxUserSkipCount int
 		var installationsToHibernate []*cmodel.InstallationDTO
+		creationTimestampCutoff := (time.Now().UnixNano() / int64(time.Millisecond)) - (int64(days) * 24 * int64(time.Hour/time.Millisecond))
+
 		for i, installation := range installations {
 			current := i + 1
 			if current%10 == 0 {
@@ -101,7 +103,7 @@ var hibernate = &cobra.Command{
 
 			logger := logger.WithField("installation", installation.ID)
 
-			shouldHibernate, err := shouldHibernate(installation, userMetrics, tc, unlock, days, maxUsers, logger)
+			shouldHibernate, err := shouldHibernate(installation, userMetrics, tc, unlock, days, maxUsers, creationTimestampCutoff, logger)
 			if shouldHibernate && err != nil {
 				logger.WithField("reason", err.Error()).Info("Skipping valid hibernation target")
 				maxUserSkipCount++
@@ -222,12 +224,17 @@ func hibernateInstallation(installation *cmodel.InstallationDTO, client *cmodel.
 // If the installation should be hibernated, but an error is also returned then
 // that indicates that the installation meets hibernation criteria, but was also
 // whitelisted due to another metric such as user count.
-func shouldHibernate(installation *cmodel.InstallationDTO, userMetrics map[string]int64, mc metricsClient, unlock bool, days, maxUsers int, logger log.FieldLogger) (bool, error) {
+func shouldHibernate(installation *cmodel.InstallationDTO, userMetrics map[string]int64, mc metricsClient, unlock bool, days, maxUsers int, creationTimestampCutoff int64, logger log.FieldLogger) (bool, error) {
 	if installation.State != cmodel.InstallationStateStable {
 		return false, errors.Errorf("expected only stable installations (%s)", installation.State)
 	}
 	if installation.APISecurityLock && !unlock {
 		return false, errors.New("installation is locked and hibernator is not set to perform unlocks")
+	}
+
+	if installation.CreateAt >= creationTimestampCutoff {
+		logger.Debugf("Installation was created in the last %d days", days)
+		return false, nil
 	}
 
 	// A small sleep to help prevent hitting the metrics host too hard.
