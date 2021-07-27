@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/mattermost/fleet-controller/internal/webhook"
 )
@@ -53,13 +54,25 @@ Filters:
 | Hibernation Calculation Errors | %d |
 `
 
-func sendHibernateWebhook(webhookURL, runID, runtime, groupID, ownerID string, days, maxUsers, stableCount, hibernatedCount, skippedCount, errorCount int) error {
+const hibernateReportErrorsSection = `
+#### Errors
+%s
+`
+
+func sendHibernateWebhook(webhookURL, runID, runtime, groupID, ownerID string, days, maxUsers, stableCount, hibernatedCount, skippedCount, errorCount int, errorDetails []string) error {
 	webhookText := fmt.Sprintf(
 		hibernateReportMessage,         // Text template
 		wrapInlineCode(runID), runtime, // Run data
 		days, maxUsers, wrapInlineCode(groupID), wrapInlineCode(ownerID), // Filters
 		stableCount, hibernatedCount, skippedCount, errorCount, // Results
 	)
+	if len(errorDetails) != 0 {
+		// Trim errors if necessary to prevent message bloat.
+		if len(errorDetails) > 10 {
+			errorDetails = append(errorDetails[0:9], "Review logs for additional error details")
+		}
+		webhookText = webhookText + fmt.Sprintf(hibernateReportErrorsSection, strings.Join(errorDetails, "\n"))
+	}
 
 	return sendWebhook(webhookURL, webhookText)
 }

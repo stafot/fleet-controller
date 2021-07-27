@@ -5,7 +5,6 @@
 package main
 
 import (
-	"fmt"
 	"time"
 
 	"github.com/pkg/errors"
@@ -92,6 +91,7 @@ var hibernate = &cobra.Command{
 
 		logger.Infof("Calculating hibernate actions on %d stable installations", len(installations))
 		var errorSkipCount, maxUserSkipCount int
+		var hibernateCalculationErrors []string
 		var installationsToHibernate []*cmodel.InstallationDTO
 		creationTimestampCutoff := (time.Now().UnixNano() / int64(time.Millisecond)) - (int64(days) * 24 * int64(time.Hour/time.Millisecond))
 
@@ -111,6 +111,7 @@ var hibernate = &cobra.Command{
 			}
 			if err != nil {
 				logger.WithError(err).Warn("Failed hibernation determination")
+				hibernateCalculationErrors = append(hibernateCalculationErrors, errors.Wrapf(err, " - `%s`", installation.ID).Error())
 				errorSkipCount++
 				continue
 			}
@@ -172,7 +173,7 @@ var hibernate = &cobra.Command{
 			}
 		}
 
-		runtime := fmt.Sprintf("%s", time.Now().Sub(start))
+		runtime := time.Since(start).Round(time.Second).String()
 
 		if len(webhookURL) != 0 {
 			logger.Info("Sending hibernation report webhook")
@@ -180,7 +181,7 @@ var hibernate = &cobra.Command{
 			err = sendHibernateWebhook(webhookURL,
 				runID, runtime, group, owner, days, maxUsers,
 				len(installations), len(installationsToHibernate),
-				maxUserSkipCount, errorSkipCount,
+				maxUserSkipCount, errorSkipCount, hibernateCalculationErrors,
 			)
 			if err != nil {
 				logger.WithError(err).Error("Failed to send Mattermost webhook")
